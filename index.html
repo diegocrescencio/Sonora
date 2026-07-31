@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Sonora — Sua música, em todo lugar</title>
+<meta name="description" content="Player de música estilo streaming: playlists, busca, fila e muito mais.">
+<meta name="theme-color" content="#121212">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sonora">
+<style>
+:root{
+  --bg:#121212; --bg-elev:#181818; --bg-elev2:#242424; --bg-card:#181818; --bg-card-hover:#282828;
+  --sidebar:#000000; --text:#ffffff; --text-sub:#b3b3b3; --accent:#1fdf64; --accent-dark:#169c46;
+  --player-h:88px; --sidebar-w:260px; --radius:8px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:'Figtree',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg); color:var(--text); overflow:hidden; user-select:none;
+}
+button{font-family:inherit;background:none;border:none;color:inherit;cursor:pointer}
+input{font-family:inherit}
+img{display:block}
+::-webkit-scrollbar{width:12px}
+::-webkit-scrollbar-thumb{background:#4d4d4d;border-radius:6px;border:3px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ===== Layout geral ===== */
+#app{display:grid;height:100%;grid-template-rows:1fr auto;grid-template-columns:var(--sidebar-w) 1fr;grid-template-areas:"sidebar main" "player player"}
+#sidebar{grid-area:sidebar;background:var(--sidebar);display:flex;flex-direction:column;padding:20px 8px 8px;gap:8px;overflow:hidden}
+#main{grid-area:main;overflow-y:auto;overflow-x:hidden;background:linear-gradient(180deg,#1f1f1f 0%,var(--bg) 320px);position:relative;border-radius:8px;margin:8px 8px 0 0}
+#playerbar{grid-area:player;height:var(--player-h)}
+
+/* ===== Sidebar ===== */
+.logo{display:flex;align-items:center;gap:10px;padding:4px 16px 14px;font-weight:800;font-size:22px;letter-spacing:-.5px}
+.logo .mark{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 32% 30%, var(--accent), #0a7a34 70%);display:grid;place-items:center;color:#000;font-size:18px}
+.nav{display:flex;flex-direction:column}
+.nav button{display:flex;align-items:center;gap:16px;padding:10px 16px;color:var(--text-sub);font-weight:700;font-size:15px;border-radius:6px;transition:color .15s}
+.nav button:hover,.nav button.active{color:var(--text)}
+.nav svg{width:24px;height:24px;flex-shrink:0}
+.sb-section{background:var(--bg-elev);border-radius:var(--radius);padding:8px;display:flex;flex-direction:column;min-height:0;flex:1}
+.sb-head{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 8px 16px;color:var(--text-sub)}
+.sb-head .t{display:flex;align-items:center;gap:12px;font-weight:700;font-size:15px}
+.sb-head button.add{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;transition:background .15s,color .15s}
+.sb-head button.add:hover{background:var(--bg-elev2);color:var(--text)}
+#sbPlaylists{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:2px;padding-top:4px}
+.sb-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:6px;cursor:pointer;text-align:left}
+.sb-item:hover{background:var(--bg-elev2)}
+.sb-item.playing .sb-name{color:var(--accent)}
+.sb-item .cover{width:48px;height:48px;border-radius:4px;flex-shrink:0}
+.sb-item .meta{min-width:0}
+.sb-name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-sub{font-size:13px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Capas geradas */
+.cover{background:var(--c1,#333);background-image:linear-gradient(135deg,var(--c1,#444),var(--c2,#222));display:grid;place-items:center;color:rgba(255,255,255,.9);font-weight:800;overflow:hidden;position:relative}
+.cover .glyph{font-size:.9em;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
+.cover.liked-cover{background-image:linear-gradient(135deg,#4527d8,#8fd3f4)}
+
+/* ===== Main / views ===== */
+#topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;padding:14px 24px;background:transparent;transition:background .2s}
+#topbar.solid{background:#1c1c1cdd;backdrop-filter:blur(10px)}
+#topbar .navbtns{display:flex;gap:8px}
+#topbar .cbtn{width:34px;height:34px;border-radius:50%;background:#000000a6;display:grid;place-items:center;color:#e8e8e8}
+#topbar .cbtn:disabled{opacity:.4;cursor:default}
+#searchWrap{flex:1;max-width:420px;display:none}
+#searchWrap.show{display:block}
+#searchInput{width:100%;padding:12px 16px 12px 44px;border-radius:24px;border:2px solid transparent;background:#242424 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23b3b3b3'%3E%3Cpath d='M10.5 3a7.5 7.5 0 1 0 4.71 13.36l4.22 4.21 1.41-1.41-4.21-4.22A7.5 7.5 0 0 0 10.5 3Zm-6 7.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z'/%3E%3C/svg%3E") 14px center/20px no-repeat;color:#fff;font-size:15px;outline:none}
+#searchInput:focus{border-color:#fff}
+.view{padding:8px 24px 40px;animation:fadein .2s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+h1.greet{font-size:32px;font-weight:800;margin:8px 0 20px}
+h2.sec{font-size:22px;font-weight:800;margin:28px 0 14px;display:flex;align-items:baseline;justify-content:space-between}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:18px}
+.card{background:var(--bg-card);border-radius:var(--radius);padding:14px;cursor:pointer;transition:background .2s;position:relative}
+.card:hover{background:var(--bg-card-hover)}
+.card .cover{width:100%;aspect-ratio:1;border-radius:6px;font-size:52px;box-shadow:0 8px 22px rgba(0,0,0,.45);margin-bottom:12px}
+.card .t{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .s{font-size:13.5px;color:var(--text-sub);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .playfab{position:absolute;right:22px;bottom:86px;width:48px;height:48px;border-radius:50%;background:var(--accent);color:#000;display:grid;place-items:center;box-shadow:0 8px 16px rgba(0,0,0,.4);opacity:0;transform:translateY(8px);transition:all .2s}
+.card:hover .playfab{opacity:1;transform:none}
+.card .playfab:hover{transform:scale(1.06);background:#3ef07f}
+.shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.shelf .tile{display:flex;align-items:center;gap:14px;background:#ffffff12;border-radius:6px;overflow:hidden;cursor:pointer;transition:background .2s;font-weight:700}
+.shelf .tile:hover{background:#ffffff22}
+.shelf .cover{width:64px;height:64px;font-size:26px;border-radius:0}
+
+/* Detalhe de playlist/álbum */
+.hero{display:flex;align-items:flex-end;gap:24px;padding:28px 0 24px}
+.hero .cover{width:200px;height:200px;font-size:84px;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,.5);flex-shrink:0}
+.hero .kind{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.hero h1{font-size:clamp(30px,5vw,58px);font-weight:900;letter-spacing:-1px;line-height:1.05;margin:8px 0 12px}
+.hero .desc{color:var(--text-sub);font-size:14.5px}
+.hero .stats{margin-top:8px;font-size:14px;color:var(--text-sub)}
+.hero .stats b{color:var(--text)}
+.actionrow{display:flex;align-items:center;gap:22px;padding:10px 0 6px}
+.bigplay{width:56px;height:56px;border-radius:50%;background:var(--accent);color:#000;display:grid;place-items:center;box-shadow:0 8px 20px rgba(0,0,0,.35);transition:transform .15s,background .15s}
+.bigplay:hover{transform:scale(1.05);background:#3ef07f}
+.iconbtn{color:var(--text-sub);transition:color .15s,transform .15s}
+.iconbtn:hover{color:var(--text)}
+.iconbtn.on{color:var(--accent)}
+.iconbtn svg{width:30px;height:30px}
+
+/* Lista de faixas */
+.tracklist{margin-top:8px}
+.tl-head,.tl-row{display:grid;grid-template-columns:34px 1fr 1fr 44px 60px;gap:14px;align-items:center;padding:8px 14px;border-radius:6px}
+.tl-head{color:var(--text-sub);font-size:13px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #ffffff1a;margin-bottom:10px;border-radius:0}
+.tl-row{cursor:pointer}
+.tl-row:hover{background:#ffffff14}
+.tl-row .num{color:var(--text-sub);font-variant-numeric:tabular-nums;text-align:center}
+.tl-row:hover .num .n{display:none}
+.tl-row .num .pl{display:none}
+.tl-row:hover .num .pl{display:inline}
+.tl-row.current .num .n,.tl-row.current .t{color:var(--accent)}
+.tl-row .who{display:flex;align-items:center;gap:12px;min-width:0}
+.tl-row .who .cover{width:42px;height:42px;border-radius:4px;font-size:17px;flex-shrink:0}
+.tl-row .t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-row .a,.tl-row .alb{font-size:14px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-row .dur{color:var(--text-sub);font-size:14px;font-variant-numeric:tabular-nums;text-align:right}
+.likebtn{color:var(--text-sub);opacity:0;transition:opacity .15s,color .15s;display:grid;place-items:center}
+.tl-row:hover .likebtn,.likebtn.on{opacity:1}
+.likebtn.on{color:var(--accent)}
+.likebtn svg{width:20px;height:20px}
+
+/* Chips de busca */
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 6px}
+.chip{padding:8px 16px;border-radius:20px;background:#ffffff12;font-size:14px;font-weight:600;transition:background .15s}
+.chip:hover{background:#ffffff24}
+.chip.on{background:#fff;color:#000}
+.genrecard{aspect-ratio:1.8;border-radius:10px;padding:16px;font-size:22px;font-weight:800;cursor:pointer;position:relative;overflow:hidden;background-image:linear-gradient(135deg,var(--c1),var(--c2))}
+.genrecard span{position:absolute;right:-6px;bottom:-6px;font-size:64px;transform:rotate(22deg);opacity:.85}
+.empty{color:var(--text-sub);padding:30px 0;text-align:center;font-size:15px}
+
+/* ===== Player bar (desktop) ===== */
+#playerbar{background:#000;display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;padding:0 16px;gap:16px}
+.pb-now{display:flex;align-items:center;gap:14px;min-width:0}
+.pb-now .cover{width:56px;height:56px;border-radius:6px;font-size:22px;flex-shrink:0;cursor:pointer}
+.pb-now .meta{min-width:0}
+.pb-now .t{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pb-now .a{font-size:12.5px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pb-center{display:flex;flex-direction:column;align-items:center;gap:6px}
+.pb-controls{display:flex;align-items:center;gap:22px}
+.pb-controls .ctrl{color:var(--text-sub);transition:color .15s,transform .1s;display:grid;place-items:center}
+.pb-controls .ctrl:hover{color:var(--text)}
+.pb-controls .ctrl.on{color:var(--accent)}
+.pb-controls .ctrl svg{width:20px;height:20px}
+.pb-controls .playpause{width:38px;height:38px;border-radius:50%;background:#fff;color:#000}
+.pb-controls .playpause:hover{transform:scale(1.06)}
+.pb-controls .playpause svg{width:20px;height:20px}
+.pb-seek{display:flex;align-items:center;gap:10px;width:100%;max-width:600px}
+.pb-seek .time{font-size:12px;color:var(--text-sub);font-variant-numeric:tabular-nums;min-width:40px}
+.pb-seek .time:last-child{text-align:left}
+.bar{flex:1;height:4px;border-radius:2px;background:#4d4d4d;position:relative;cursor:pointer}
+.bar .fill{position:absolute;inset:0;width:0%;background:#fff;border-radius:2px}
+.bar:hover .fill{background:var(--accent)}
+.bar .knob{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:#fff;transform:translate(-50%,-50%);opacity:0}
+.bar:hover .knob{opacity:1}
+.pb-right{display:flex;align-items:center;justify-content:flex-end;gap:14px}
+.pb-right .ctrl{color:var(--text-sub)}
+.pb-right .ctrl:hover{color:var(--text)}
+.pb-right .ctrl.on{color:var(--accent)}
+.pb-right svg{width:19px;height:19px}
+#volBar{width:100px}
+
+/* Ripple de "tocando agora" */
+.eq{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.eq i{width:3px;background:var(--accent);animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:.2s}.eq i:nth-child(3){animation-delay:.4s}
+@keyframes eq{0%,100%{height:4px}50%{height:14px}}
+.paused .eq i{animation-play-state:paused;height:5px}
+
+/* ===== Mobile ===== */
+#mobileNav{display:none}
+#miniPlayer{display:none}
+#fsPlayer{display:none}
+
+@media (max-width: 860px){
+  #app{grid-template-columns:1fr;grid-template-areas:"main" "player"}
+  #sidebar{display:none}
+  #main{margin:0;border-radius:0;padding-bottom:0}
+  #playerbar{display:none}
+  .view{padding:8px 16px calc(170px + var(--safe-bottom))}
+  h1.greet{font-size:26px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+  .card{padding:10px}
+  .card .playfab{display:none}
+  .shelf{grid-template-columns:1fr 1fr;gap:8px}
+  .shelf .cover{width:52px;height:52px;font-size:20px}
+  .shelf .tile{font-size:13px;gap:10px}
+  .hero{flex-direction:column;align-items:flex-start;gap:16px;padding-top:12px}
+  .hero .cover{width:46vw;height:46vw;max-width:220px;max-height:220px;align-self:center}
+  .tl-head{display:none}
+  .tl-row{grid-template-columns:1fr 44px;padding:8px 4px}
+  .tl-row .num,.tl-row .alb,.tl-row .dur{display:none}
+  #topbar{padding:12px 16px}
+
+  #mobileNav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;background:linear-gradient(180deg,#000000d9,#000);padding:8px 0 calc(8px + var(--safe-bottom));justify-content:space-around}
+  #mobileNav button{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--text-sub);font-size:11px;font-weight:600;width:80px}
+  #mobileNav button.active{color:#fff}
+  #mobileNav svg{width:26px;height:26px}
+
+  #miniPlayer{display:flex;position:fixed;left:8px;right:8px;bottom:calc(62px + var(--safe-bottom));z-index:59;background:#3a3a3a;border-radius:8px;align-items:center;gap:10px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+  #miniPlayer .cover{width:42px;height:42px;border-radius:5px;font-size:17px;flex-shrink:0}
+  #miniPlayer .meta{flex:1;min-width:0}
+  #miniPlayer .t{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #miniPlayer .a{font-size:12px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #miniPlayer .mctrl{width:42px;height:42px;display:grid;place-items:center}
+  #miniPlayer .mctrl svg{width:24px;height:24px}
+  #miniPlayer .miniprog{position:absolute;left:8px;right:8px;bottom:2px;height:2px;background:#ffffff33;border-radius:1px}
+  #miniPlayer .miniprog i{display:block;height:100%;width:0%;background:#fff;border-radius:1px}
+}
+
+/* Player fullscreen mobile */
+#fsPlayer{position:fixed;inset:0;z-index:100;background:linear-gradient(180deg,var(--c1,#3a3a3a),#121212 82%);flex-direction:column;padding:18px 22px calc(26px + var(--safe-bottom));animation:slideup .25s ease}
+#fsPlayer.open{display:flex}
+@keyframes slideup{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+.fs-top{display:flex;align-items:center;justify-content:space-between;color:#fff}
+.fs-top .ctx{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#ffffffcc;text-align:center}
+.fs-art{flex:1;display:grid;place-items:center;padding:22px 0}
+.fs-art .cover{width:min(78vw,340px);aspect-ratio:1;border-radius:10px;font-size:110px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+.fs-meta{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.fs-meta .t{font-size:21px;font-weight:800}
+.fs-meta .a{font-size:15px;color:#ffffffb3;margin-top:2px}
+.fs-seek{margin:16px 0 4px}
+.fs-seek .bar{height:5px}
+.fs-times{display:flex;justify-content:space-between;font-size:12px;color:#ffffff99;margin-top:6px;font-variant-numeric:tabular-nums}
+.fs-controls{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.fs-controls .ctrl{color:#fff;display:grid;place-items:center}
+.fs-controls .ctrl svg{width:28px;height:28px}
+.fs-controls .side.on{color:var(--accent)}
+.fs-controls .side{color:#ffffffcc}
+.fs-controls .side svg{width:24px;height:24px}
+.fs-controls .playpause{width:68px;height:68px;border-radius:50%;background:#fff;color:#000}
+.fs-controls .playpause svg{width:30px;height:30px}
+
+/* ===== Modais / toast / menu ===== */
+.overlay{position:fixed;inset:0;background:#000000b3;z-index:120;display:none;place-items:center;padding:20px}
+.overlay.open{display:grid}
+.modal{background:var(--bg-elev2);border-radius:12px;padding:24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.modal h3{font-size:20px;font-weight:800;margin-bottom:16px}
+.modal input[type=text]{width:100%;padding:12px 14px;border-radius:6px;border:1px solid #555;background:#3a3a3a;color:#fff;font-size:15px;outline:none;margin-bottom:16px}
+.modal input[type=text]:focus{border-color:#fff}
+.modal .mrow{display:flex;justify-content:flex-end;gap:10px}
+.btn{padding:11px 26px;border-radius:24px;font-weight:700;font-size:14.5px;transition:transform .1s}
+.btn:hover{transform:scale(1.03)}
+.btn.primary{background:var(--accent);color:#000}
+.btn.ghost{color:var(--text-sub)}
+.btn.ghost:hover{color:#fff}
+.picklist{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.picklist button{display:flex;align-items:center;gap:12px;padding:10px;border-radius:6px;text-align:left;font-weight:600}
+.picklist button:hover{background:#ffffff14}
+.picklist .cover{width:44px;height:44px;border-radius:4px;font-size:18px}
+#toast{position:fixed;left:50%;bottom:calc(var(--player-h) + 24px);transform:translateX(-50%) translateY(20px);background:var(--accent);color:#000;font-weight:700;font-size:14px;padding:12px 22px;border-radius:8px;z-index:200;opacity:0;pointer-events:none;transition:all .25s;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+#toast.show{opacity:1;transform:translateX(-50%)}
+@media (max-width:860px){#toast{bottom:calc(130px + var(--safe-bottom))}}
+#ctxMenu{position:fixed;z-index:150;background:#282828;border-radius:8px;padding:6px;min-width:220px;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none}
+#ctxMenu.open{display:block}
+#ctxMenu button{display:flex;width:100%;align-items:center;gap:10px;padding:10px 12px;border-radius:5px;font-size:14px;font-weight:600;text-align:left}
+#ctxMenu button:hover{background:#ffffff1a}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ============ SIDEBAR (desktop) ============ -->
+  <aside id="sidebar">
+    <div class="logo"><span class="mark">♪</span> Sonora</div>
+    <nav class="nav">
+      <button data-nav="home" class="active"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 2 11h2.5v9H10v-6h4v6h5.5v-9H22L12 3z"/></svg>Início</button>
+      <button data-nav="search"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.5 3a7.5 7.5 0 1 0 4.71 13.36l4.22 4.21 1.41-1.41-4.21-4.22A7.5 7.5 0 0 0 10.5 3Zm-6 7.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>Buscar</button>
+    </nav>
+    <div class="sb-section">
+      <div class="sb-head">
+        <span class="t"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h2v16H3V4zm5 0h2v16H8V4zm5.6.3 7 15.1-1.8.9-7-15.1 1.8-.9z"/></svg>Sua Biblioteca</span>
+        <span style="display:flex;gap:4px">
+        <button class="add" id="btnImportSb" title="Importar músicas"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l5 5h-3v6h-4V8H7l5-5zM5 19h14v2H5v-2z"/></svg></button>
+        <button class="add" id="btnNewPlaylist" title="Criar playlist"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4z"/></svg></button>
+        </span>
+      </div>
+      <div id="sbPlaylists"></div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main id="main">
+    <div id="topbar">
+      <div class="navbtns">
+        <button class="cbtn" id="btnBack" title="Voltar"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 4.5 8 12l7.5 7.5-1.4 1.4L5.2 12l8.9-8.9 1.4 1.4z"/></svg></button>
+      </div>
+      <div id="searchWrap"><input id="searchInput" type="text" placeholder="O que você quer ouvir?" autocomplete="off"></div>
+    </div>
+    <div id="viewRoot"></div>
+  </main>
+
+  <!-- ============ PLAYER BAR (desktop) ============ -->
+  <footer id="playerbar">
+    <div class="pb-now">
+      <div class="cover" id="pbCover" title="Abrir"><span class="glyph">♪</span></div>
+      <div class="meta"><div class="t" id="pbTitle">—</div><div class="a" id="pbArtist">Escolha uma música</div></div>
+      <button class="likebtn" id="pbLike" style="opacity:1" title="Curtir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7.5-4.6-10-9.2C.5 8.4 2.6 4.5 6.4 4.5c2.2 0 3.8 1.2 5.6 3.3 1.8-2.1 3.4-3.3 5.6-3.3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg></button>
+    </div>
+    <div class="pb-center">
+      <div class="pb-controls">
+        <button class="ctrl" id="btnShuffle" title="Aleatório"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 4h5v5h-2V7.4l-4.2 4.2-1.4-1.4L18.6 6H17V4zM2 6h4.6l3.1 3.1-1.4 1.4L5.8 8H2V6zm16.6 10H17v2h5v-5h-2v1.6l-4.3-4.3-1.4 1.4 4.3 4.3zM2 16h3.8l3.5-3.5 1.4 1.4L6.6 18H2v-2z"/></svg></button>
+        <button class="ctrl" id="btnPrev" title="Anterior"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6V5zm14 0v14l-10-7 10-7z"/></svg></button>
+        <button class="playpause" id="btnPlay" title="Play/Pause"><svg id="icPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5z"/></svg><svg id="icPause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+        <button class="ctrl" id="btnNext" title="Próxima"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2V5zM4 5l10 7-10 7V5z"/></svg></button>
+        <button class="ctrl" id="btnRepeat" title="Repetir"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg><span id="repeatOne" style="display:none;position:absolute;font-size:9px;font-weight:900;transform:translate(0,-1px)">1</span></button>
+      </div>
+      <div class="pb-seek">
+        <span class="time" id="tCur">0:00</span>
+        <div class="bar" id="seekBar"><div class="fill" id="seekFill"></div><div class="knob" id="seekKnob"></div></div>
+        <span class="time" id="tDur">0:00</span>
+      </div>
+    </div>
+    <div class="pb-right">
+      <button class="ctrl" id="btnQueue" title="Fila"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h13v2H3V6zm0 5h13v2H3v-2zm0 5h9v2H3v-2zm15-5 5 3-5 3v-6z"/></svg></button>
+      <button class="ctrl" id="btnMute" title="Mudo"><svg viewBox="0 0 24 24" fill="currentColor" id="icVol"><path d="M4 9v6h4l6 5V4L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg></button>
+      <div class="bar" id="volBar"><div class="fill" id="volFill" style="width:80%"></div><div class="knob" id="volKnob"></div></div>
+    </div>
+  </footer>
+</div>
+
+<!-- ============ MOBILE ============ -->
+<div id="miniPlayer">
+  <div class="cover" id="mpCover"><span class="glyph">♪</span></div>
+  <div class="meta"><div class="t" id="mpTitle">Escolha uma música</div><div class="a" id="mpArtist">Sonora</div></div>
+  <button class="mctrl" id="mpLike"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 21s-7.5-4.6-10-9.2C.5 8.4 2.6 4.5 6.4 4.5c2.2 0 3.8 1.2 5.6 3.3 1.8-2.1 3.4-3.3 5.6-3.3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg></button>
+  <button class="mctrl" id="mpPlay"><svg id="mpIcPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5z"/></svg><svg id="mpIcPause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+  <div class="miniprog"><i id="mpProg"></i></div>
+</div>
+<nav id="mobileNav">
+  <button data-nav="home" class="active"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 2 11h2.5v9H10v-6h4v6h5.5v-9H22L12 3z"/></svg>Início</button>
+  <button data-nav="search"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.5 3a7.5 7.5 0 1 0 4.71 13.36l4.22 4.21 1.41-1.41-4.21-4.22A7.5 7.5 0 0 0 10.5 3Zm-6 7.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>Buscar</button>
+  <button data-nav="library"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h2v16H3V4zm5 0h2v16H8V4zm5.6.3 7 15.1-1.8.9-7-15.1 1.8-.9z"/></svg>Biblioteca</button>
+</nav>
+
+<!-- Player fullscreen (mobile) -->
+<div id="fsPlayer">
+  <div class="fs-top">
+    <button id="fsClose"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.5 4.5 8l1.4-1.4L12 12.7l6.1-6.1L19.5 8 12 15.5z"/></svg></button>
+    <div class="ctx"><div style="opacity:.75">Tocando de</div><div id="fsCtx" style="font-weight:700;margin-top:2px">Sonora</div></div>
+    <button id="fsMore" style="width:28px"></button>
+  </div>
+  <div class="fs-art"><div class="cover" id="fsCover"><span class="glyph">♪</span></div></div>
+  <div class="fs-meta">
+    <div style="min-width:0"><div class="t" id="fsTitle">—</div><div class="a" id="fsArtist">—</div></div>
+    <button class="likebtn on" id="fsLike" style="opacity:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28"><path d="M12 21s-7.5-4.6-10-9.2C.5 8.4 2.6 4.5 6.4 4.5c2.2 0 3.8 1.2 5.6 3.3 1.8-2.1 3.4-3.3 5.6-3.3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg></button>
+  </div>
+  <div class="fs-seek"><div class="bar" id="fsSeekBar"><div class="fill" id="fsSeekFill"></div><div class="knob" id="fsKnob" style="opacity:1"></div></div>
+    <div class="fs-times"><span id="fsTCur">0:00</span><span id="fsTDur">0:00</span></div>
+  </div>
+  <div class="fs-controls">
+    <button class="side ctrl" id="fsShuffle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 4h5v5h-2V7.4l-4.2 4.2-1.4-1.4L18.6 6H17V4zM2 6h4.6l3.1 3.1-1.4 1.4L5.8 8H2V6zm16.6 10H17v2h5v-5h-2v1.6l-4.3-4.3-1.4 1.4 4.3 4.3zM2 16h3.8l3.5-3.5 1.4 1.4L6.6 18H2v-2z"/></svg></button>
+    <button class="ctrl" id="fsPrev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6V5zm14 0v14l-10-7 10-7z"/></svg></button>
+    <button class="playpause ctrl" id="fsPlay"><svg id="fsIcPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7L8 5z"/></svg><svg id="fsIcPause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+    <button class="ctrl" id="fsNext"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2V5zM4 5l10 7-10 7V5z"/></svg></button>
+    <button class="side ctrl" id="fsRepeat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
+  </div>
+</div>
+
+<!-- Modais -->
+<div class="overlay" id="ovNewPlaylist">
+  <div class="modal">
+    <h3>Criar playlist</h3>
+    <input type="text" id="inpPlName" placeholder="Nome da playlist" maxlength="60">
+    <div class="mrow"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="btnCreatePl">Criar</button></div>
+  </div>
+</div>
+<div class="overlay" id="ovAddTo">
+  <div class="modal">
+    <h3>Adicionar à playlist</h3>
+    <div class="picklist" id="addToList"></div>
+    <div class="mrow"><button class="btn ghost" data-close>Cancelar</button></div>
+  </div>
+</div>
+
+<div id="ctxMenu"></div>
+<div id="toast"></div>
+<input type="file" id="fileImport" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac,.aac" multiple hidden>
+<audio id="audio" preload="metadata"></audio>
+<script src="app.js"></script>
+</body>
+</html>
