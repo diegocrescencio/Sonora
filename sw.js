@@ -1,5 +1,5 @@
 /* Service Worker do Sonora — cache do app para abrir rápido e offline */
-const CACHE = 'sonora-v2';
+const CACHE = 'sonora-v3';
 const ASSETS = [
   './',
   './index.html',
