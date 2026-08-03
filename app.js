@@ -173,6 +173,12 @@ function savePls(){ store.set('playlists', S.userPlaylists); }
 function collection(id){
   if(id==='liked') return { id:'liked', name:'Músicas Curtidas', desc:'Tudo que você curtiu 💜', kind:'Playlist', c1:'#4527d8', c2:'#8fd3f4', glyph:'💜', tracks:[...S.likes] };
   if(id==='local') return { id:'local', name:'Suas Músicas', desc:'Importadas do aparelho e da sua pasta musicas/ no GitHub.', kind:'Biblioteca', c1:'#0ba360', c2:'#053d24', glyph:'📂', tracks:LOCAL.map(t=>t.id) };
+  if(String(id).startsWith('rpl_')){
+    const p=REPO_PLS.find(x=>x.id===id); if(!p) return null;
+    const st=styleFor(p.name);
+    return { id, name:p.name, kind:'Playlist', desc:'Compartilhada na nuvem — igual em todos os aparelhos', c1:st.c1, c2:st.c2, glyph:'☁️',
+      tracks:p.files.map(fileToId).filter(x=>LOCAL.some(t=>t.id===x)) };
+  }
   const cur = CURATED.find(p=>p.id===id); if(cur) return {...cur, kind:'Playlist'};
   const al = ALBUMS.find(a=>a.id===id);
   if(al) return { ...al, name:al.title, kind:'Álbum', desc:al.artist, tracks:TRACKS.filter(t=>t.album===id).map(t=>t.id) };
@@ -216,24 +222,124 @@ async function removeLocal(id){
 }
 
 /* ---------- Biblioteca hospedada no repositório ---------- */
+let REPO_PLS = []; // playlists compartilhadas definidas no biblioteca.json
+const fileToId = f => 'rep_'+String(f).replace(/[^a-z0-9]/gi,'_');
 async function loadRepoLibrary(){
   try{
     const r=await fetch('musicas/biblioteca.json',{cache:'no-cache'});
     if(!r.ok) return;
     const data=await r.json();
     const faixas=data.faixas||data.tracks||[];
+    LOCAL=LOCAL.filter(t=>t.source!=='repo');
     for(const f of faixas){
       const file=f.arquivo||f.file; if(!file) continue;
-      const id='rep_'+file.replace(/[^a-z0-9]/gi,'_');
+      const id=fileToId(file);
       if(LOCAL.some(t=>t.id===id)) continue;
       const st=styleFor(f.album||f.artista||file);
       LOCAL.push({ id, title:f.titulo||f.title||file.split('/').pop().replace(/\.[^.]+$/,''),
         artist:f.artista||f.artist||'Artista desconhecido', albumTitle:f.album||'Minha Biblioteca',
         genre:'Suas músicas', c1:f.cor1||st.c1, c2:f.cor2||st.c2, glyph:f.emoji||st.glyph, url:file, source:'repo' });
     }
-    if(faixas.length) render();
+    REPO_PLS=(data.playlists||[]).map(p=>({ id:'rpl_'+String(p.nome||'').replace(/[^a-z0-9]/gi,'_'), name:p.nome||'Compartilhada', files:p.faixas||[] }));
+    render();
   }catch(e){ /* sem biblioteca.json — tudo bem */ }
 }
+/* Atualização automática: o aparelho da loja pega músicas novas sozinho */
+setInterval(loadRepoLibrary, 5*60*1000);
+
+/* ---------- Nuvem: enviar músicas pelo app (API do GitHub) ---------- */
+S_cloud_init();
+function S_cloud_init(){ S.cloud = store.get('cloud', null); }
+const fileToB64 = f => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(f); });
+function b64decode(s){ const b=Uint8Array.from(atob(String(s).replace(/\s/g,'')),c=>c.charCodeAt(0)); return new TextDecoder().decode(b); }
+function b64encode(s){ const b=new TextEncoder().encode(s); let bin=''; b.forEach(x=>bin+=String.fromCharCode(x)); return btoa(bin); }
+const sanitizeName = n => n.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9._-]/g,'_');
+
+async function gh(path, method='GET', body=null){
+  const c=S.cloud; const br=c.branch||'main';
+  const url=`https://api.github.com/repos/${c.user}/${c.repo}/contents/${path}`+(method==='GET'?`?ref=${br}`:'');
+  const r=await fetch(url,{ method,
+    headers:{ 'Authorization':'Bearer '+c.token, 'Accept':'application/vnd.github+json' },
+    body: body?JSON.stringify({...body, branch:br}):null });
+  if(method==='GET' && r.status===404) return null;
+  if(!r.ok) throw new Error('GitHub respondeu '+r.status);
+  return r.json();
+}
+
+let _pendingUpload=null;
+function startCloudSend(files){
+  const list=[...files].filter(f=>f.type.startsWith('audio/')||/\.(mp3|m4a|ogg|wav|flac|aac)$/i.test(f.name));
+  if(!list.length){ toast('Nenhum arquivo de áudio selecionado'); return; }
+  _pendingUpload=list;
+  // escolher playlist compartilhada de destino
+  const lst=$('#sendToList');
+  lst.innerHTML=[
+    `<button data-target="">📂 Só na biblioteca (sem playlist)</button>`,
+    ...REPO_PLS.map(p=>`<button data-target="${esc(p.name)}">☁️ ${esc(p.name)} <small style="color:var(--text-sub)">(${p.files.length})</small></button>`)
+  ].join('');
+  lst.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    $('#ovSendTo').classList.remove('open');
+    uploadFiles(_pendingUpload, b.dataset.target||null);
+  }));
+  $('#inpNewShared').value='';
+  $('#ovSendTo').classList.add('open');
+}
+$('#btnSendNew').addEventListener('click',()=>{
+  const name=$('#inpNewShared').value.trim();
+  if(!name){ toast('Digite o nome da playlist'); return; }
+  $('#ovSendTo').classList.remove('open');
+  uploadFiles(_pendingUpload, name);
+});
+
+async function uploadFiles(files, targetPl){
+  if(!S.cloud){ openCloudModal(); return; }
+  const total=files.length; const newEntries=[];
+  try{
+    for(let i=0;i<total;i++){
+      const f=files[i];
+      toast(`Enviando ${i+1}/${total}: ${f.name}…`);
+      const tags=await readTags(f);
+      let name='musicas/'+sanitizeName(f.name);
+      if(await gh(name)) name=name.replace(/(\.[^.]+)$/, '-'+Date.now()+'$1'); // já existe → renomeia
+      const b64=await fileToB64(f);
+      await gh(name,'PUT',{ message:'Sonora: adicionar '+tags.title, content:b64 });
+      newEntries.push({ titulo:tags.title, artista:tags.artist, album:tags.album||'Nuvem', arquivo:name });
+    }
+    toast('Atualizando a biblioteca…');
+    const cur=await gh('musicas/biblioteca.json');
+    let data={faixas:[]}, sha=undefined;
+    if(cur){ sha=cur.sha; try{ data=JSON.parse(b64decode(cur.content)); }catch(e){ data={faixas:[]}; } }
+    data.faixas=(data.faixas||[]).concat(newEntries);
+    if(targetPl){
+      data.playlists=data.playlists||[];
+      let p=data.playlists.find(x=>x.nome===targetPl);
+      if(!p){ p={nome:targetPl, faixas:[]}; data.playlists.push(p); }
+      p.faixas.push(...newEntries.map(e=>e.arquivo));
+    }
+    await gh('musicas/biblioteca.json','PUT',{ message:'Sonora: atualizar biblioteca', content:b64encode(JSON.stringify(data,null,2)), ...(sha?{sha}:{}) });
+    toast(`${total} música${total>1?'s':''} na nuvem! Aparece em todos os aparelhos em alguns minutos 🎉`);
+    setTimeout(loadRepoLibrary, 90*1000); // GitHub Pages leva ~1 min para publicar
+  }catch(e){
+    toast('Falha no envio: '+e.message+' — confira usuário/repositório/token');
+  }
+}
+
+function openCloudModal(){
+  const c=S.cloud||{};
+  $('#inpGhUser').value=c.user||''; $('#inpGhRepo').value=c.repo||'';
+  $('#inpGhBranch').value=c.branch||''; $('#inpGhToken').value=c.token||'';
+  $('#ovCloud').classList.add('open');
+}
+$('#btnSaveCloud').addEventListener('click',()=>{
+  const user=$('#inpGhUser').value.trim(), repo=$('#inpGhRepo').value.trim(),
+        branch=$('#inpGhBranch').value.trim(), token=$('#inpGhToken').value.trim();
+  if(!user||!repo||!token){ toast('Preencha usuário, repositório e token'); return; }
+  S.cloud={user,repo,branch,token}; store.set('cloud',S.cloud);
+  $('#ovCloud').classList.remove('open'); toast('Nuvem configurada ✅');
+});
+const upInput=$('#fileUpload');
+if(upInput) upInput.addEventListener('change',()=>{ startCloudSend(upInput.files); upInput.value=''; });
+function askCloudSend(){ if(!S.cloud){ openCloudModal(); toast('Configure a nuvem primeiro'); return; } upInput.click(); }
 
 /* ---------- Player ---------- */
 function trackURL(t){
@@ -419,7 +525,7 @@ function viewHome(){
       <div class="tile" data-open="liked">${coverHTML(collection('liked'))}<span>Músicas Curtidas</span></div>
     </div>
     <h2 class="sec">Sua coleção</h2>
-    <div class="grid">${localCard}${cardHTML({...collection('liked'), desc:`${S.likes.size} curtidas`})}</div>
+    <div class="grid">${REPO_PLS.map(p=>cardHTML(collection(p.id))).join('')}${localCard}${cardHTML({...collection('liked'), desc:`${S.likes.size} curtidas`})}</div>
     <h2 class="sec">Feito para você</h2>
     <div class="grid">${CURATED.map(cardHTML).join('')}</div>
     <h2 class="sec">Álbuns em destaque</h2>
@@ -448,12 +554,14 @@ function viewSearch(q){
 }
 
 function viewLibrary(){
-  const items=[collection('local'), collection('liked'), ...S.userPlaylists.map(p=>collection(p.id)), ...CURATED.map(c=>collection(c.id))];
+  const items=[collection('local'), ...REPO_PLS.map(p=>collection(p.id)), collection('liked'), ...S.userPlaylists.map(p=>collection(p.id)), ...CURATED.map(c=>collection(c.id))];
   return `
     <h1 class="greet">Sua Biblioteca</h1>
     <div style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn primary" id="libImport">⬆️ Importar músicas</button>
+      <button class="btn primary" id="libImport">⬆️ Importar (só neste aparelho)</button>
+      <button class="btn primary" id="libSend" style="background:#4fc3f7">☁️ Enviar p/ todos os aparelhos</button>
       <button class="btn primary" id="libNewPl" style="background:#fff">+ Criar playlist</button>
+      <button class="btn ghost" id="libCloud" title="Configurar nuvem">⚙️ Nuvem</button>
     </div>
     <div class="grid">${items.map(c=>cardHTML({...c, desc:(c.kind||'Playlist') + (c.tracks?` • ${c.tracks.length} músicas`:'')})).join('')}</div>`;
 }
@@ -538,6 +646,8 @@ function bindView(root){
   for(const sel of ['#libImport','#colImport','#homeImport']){
     const b=root.querySelector(sel); if(b) b.addEventListener('click',askImport);
   }
+  const snd=root.querySelector('#libSend'); if(snd) snd.addEventListener('click',askCloudSend);
+  const cld=root.querySelector('#libCloud'); if(cld) cld.addEventListener('click',openCloudModal);
 }
 
 /* ---------- Busca ao vivo ---------- */
@@ -551,7 +661,7 @@ $('#searchInput').addEventListener('input', ()=>{ if(S.view.name==='search') ren
 /* ---------- Sidebar ---------- */
 function renderSidebar(){
   const el=$('#sbPlaylists'); if(!el) return;
-  const items=[collection('local'), collection('liked'), ...S.userPlaylists.map(p=>collection(p.id)), ...CURATED.map(c=>collection(c.id)), ...ALBUMS.map(a=>collection(a.id))];
+  const items=[collection('local'), ...REPO_PLS.map(p=>collection(p.id)), collection('liked'), ...S.userPlaylists.map(p=>collection(p.id)), ...CURATED.map(c=>collection(c.id)), ...ALBUMS.map(a=>collection(a.id))];
   el.innerHTML=items.map(c=>{
     const playing = S.ctxName===c.name && audio.src && !audio.paused;
     return `<button class="sb-item ${playing?'playing':''}" data-open="${c.id}">
