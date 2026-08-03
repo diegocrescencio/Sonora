@@ -382,9 +382,30 @@ h2.sec{font-size:22px;font-weight:800;margin:28px 0 14px;display:flex;align-item
   </div>
 </div>
 
+<div class="overlay" id="ovCloud">
+  <div class="modal">
+    <h3>☁️ Nuvem compartilhada (GitHub)</h3>
+    <div style="font-size:13px;color:var(--text-sub);margin-bottom:14px">Permite enviar músicas pelo app para todos os aparelhos. Crie um token em GitHub → Settings → Developer settings → Fine-grained tokens (permissão: Contents, Read and write, só neste repositório).</div>
+    <input type="text" id="inpGhUser" placeholder="Usuário do GitHub (ex.: fulano)">
+    <input type="text" id="inpGhRepo" placeholder="Nome do repositório (ex.: sonora)">
+    <input type="text" id="inpGhBranch" placeholder="Branch (deixe vazio = main)">
+    <input type="text" id="inpGhToken" placeholder="Token (github_pat_...)">
+    <div class="mrow"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="btnSaveCloud">Salvar</button></div>
+  </div>
+</div>
+<div class="overlay" id="ovSendTo">
+  <div class="modal">
+    <h3>Enviar para qual playlist?</h3>
+    <div class="picklist" id="sendToList"></div>
+    <input type="text" id="inpNewShared" placeholder="…ou nome de uma playlist nova (ex.: Loja)">
+    <div class="mrow"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="btnSendNew">Criar e enviar</button></div>
+  </div>
+</div>
+
 <div id="ctxMenu"></div>
 <div id="toast"></div>
 <input type="file" id="fileImport" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac,.aac" multiple hidden>
+<input type="file" id="fileUpload" accept="audio/*,.mp3,.m4a,.ogg,.wav,.flac,.aac" multiple hidden>
 <audio id="audio" preload="metadata"></audio>
 <script src="app.js"></script>
 </body>
